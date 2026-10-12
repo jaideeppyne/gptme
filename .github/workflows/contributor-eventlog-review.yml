@@ -19,7 +19,7 @@ jobs:
           python-version: '3.13'
       - name: Clean exact source and lockfile environment
         run: |
-          git worktree add /tmp/gptme-source ff37c3f08e6ef0ba9500aa4fc96ea069462de9a0
+          git worktree add /tmp/gptme-source 9151b7511d20d6c6ae13844923a0193ac3ba57c6
           mkdir -p proof /tmp/gptme-review-home
           python -m venv /tmp/gptme-poetry
           /tmp/gptme-poetry/bin/pip install poetry
