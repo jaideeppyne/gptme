@@ -23,10 +23,12 @@ def main() -> None:
         if name.startswith("test_split_utf8_pipe_output["):
             assert failure is not None, f"Regression unexpectedly passed: {name}"
             detail = failure.text or ""
-            assert "AssertionError" in detail, detail
-            assert "\ufffd" in detail or "\\ufffd" in detail, detail
-            assert "fixture did not capture" not in detail, detail
-            assert "TimeoutExpired" not in detail, detail
+            message = failure.attrib.get("message", "")
+            assert message.startswith("AssertionError: assert "), message
+            assert "\ufffd" in message or "\\ufffd" in message, message
+            assert "assert job.get_output(incremental=True)[index] == prefix" in detail
+            assert "fixture did not capture" not in message, message
+            assert "TimeoutExpired" not in message, message
             failures.append(name)
         else:
             assert failure is None, f"Healthy control failed: {name}"
