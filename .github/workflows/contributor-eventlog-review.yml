@@ -1,0 +1,57 @@
+name: Contributor eventlog review verification (fork only)
+on:
+  push:
+    branches: ['verify/event-log-review-oct12']
+permissions:
+  contents: read
+jobs:
+  review:
+    if: github.repository == 'jaideeppyne/gptme'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      - name: Clean exact source and lockfile environment
+        run: |
+          git worktree add /tmp/gptme-source ff37c3f08e6ef0ba9500aa4fc96ea069462de9a0
+          mkdir -p proof /tmp/gptme-review-home
+          python -m venv /tmp/gptme-poetry
+          /tmp/gptme-poetry/bin/pip install poetry
+          export HOME=/tmp/gptme-review-home
+          cd /tmp/gptme-source
+          /tmp/gptme-poetry/bin/poetry install -E server
+          /tmp/gptme-poetry/bin/poetry run gptme --version
+          /tmp/gptme-poetry/bin/poetry run pytest tests/test_cli.py::test_version -q --timeout 60
+      - name: Changed-file hooks and targeted type check
+        run: |
+          export HOME=/tmp/gptme-review-home
+          cd /tmp/gptme-source
+          set -o pipefail
+          SKIP=mypy /tmp/gptme-poetry/bin/poetry run pre-commit run --files tests/test_eventlog.py 2>&1 | tee "$GITHUB_WORKSPACE/proof/hooks.log"
+          /tmp/gptme-poetry/bin/poetry run mypy --follow-imports=silent tests/test_eventlog.py 2>&1 | tee "$GITHUB_WORKSPACE/proof/mypy.log"
+          git diff --exit-code
+      - name: Related log-manager suite and repeated new regressions
+        run: |
+          export HOME=/tmp/gptme-review-home
+          cd /tmp/gptme-source
+          set -o pipefail
+          /tmp/gptme-poetry/bin/poetry run pytest -v --timeout 60 -m 'not slow and not eval and not requires_api' \
+            tests/test_eventlog.py tests/test_logmanager.py tests/test_logmanager_corrupt_lines.py tests/test_logmanager_locking.py \
+            2>&1 | tee "$GITHUB_WORKSPACE/proof/tests.log"
+          for iteration in $(seq 1 20); do
+            /tmp/gptme-poetry/bin/poetry run pytest -q --timeout 60 \
+              tests/test_eventlog.py::test_checkpoint_after_damaged_compacted_tail \
+              tests/test_eventlog.py::test_concurrent_appends_after_damaged_tail
+          done 2>&1 | tee "$GITHUB_WORKSPACE/proof/repeated.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eventlog-review-proof
+          path: proof/
+          retention-days: 7
