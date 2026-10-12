@@ -1,0 +1,75 @@
+name: Contributor background UTF-8 fixed verification (fork only)
+on:
+  push:
+    branches: ['verify/background-shell-utf8-fixed']
+permissions:
+  contents: read
+jobs:
+  fixed:
+    if: github.repository == 'jaideeppyne/gptme'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      - name: Clean exact source and isolated lockfile environment
+        run: |
+          git worktree add /tmp/gptme-source fab1d5fb5df0883b0a1f62e5201b4340ac5db1ba
+          mkdir -p proof /tmp/gptme-fixed-home
+          python -m venv /tmp/gptme-poetry
+          /tmp/gptme-poetry/bin/pip install poetry
+          export HOME=/tmp/gptme-fixed-home
+          export XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"
+          cd /tmp/gptme-source
+          /tmp/gptme-poetry/bin/poetry install -E server
+          /tmp/gptme-poetry/bin/poetry run gptme --version
+          /tmp/gptme-poetry/bin/poetry run pytest tests/test_cli.py::test_version -q --timeout 60
+      - name: Pinned changed-file hooks and targeted lockfile type check
+        run: |
+          export HOME=/tmp/gptme-fixed-home
+          export XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"
+          cd /tmp/gptme-source
+          set -o pipefail
+          set +e
+          SKIP=mypy /tmp/gptme-poetry/bin/poetry run pre-commit run --files gptme/tools/shell_background.py tests/test_shell_background.py 2>&1 | tee "$GITHUB_WORKSPACE/proof/hooks.log"
+          hook_rc=${PIPESTATUS[0]}
+          set -e
+          git diff --binary > "$GITHUB_WORKSPACE/proof/format.patch"
+          test "$hook_rc" -eq 0
+          git diff --exit-code
+          /tmp/gptme-poetry/bin/poetry run mypy --follow-imports=silent gptme/tools/shell_background.py tests/test_shell_background.py 2>&1 | tee "$GITHUB_WORKSPACE/proof/mypy.log"
+      - name: Background and neighboring shell reader suites
+        run: |
+          export HOME=/tmp/gptme-fixed-home
+          export XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"
+          cd /tmp/gptme-source
+          set -o pipefail
+          /tmp/gptme-poetry/bin/poetry run pytest -v --timeout 60 --retries 0 \
+            -m 'not slow and not eval and not requires_api' \
+            --junitxml="$GITHUB_WORKSPACE/proof/tests.xml" \
+            tests/test_shell_background.py tests/test_shell_foreground_promotion.py \
+            tests/test_shell_high_fd.py tests/test_shell_stream_oneshot.py \
+            tests/test_shell_completion_wait.py tests/test_shell_output_mixing_issue408.py \
+            tests/test_shell_fd_leak.py tests/test_shell_max_output_bytes.py \
+            2>&1 | tee "$GITHUB_WORKSPACE/proof/tests.log"
+          for iteration in $(seq 1 20); do
+            /tmp/gptme-poetry/bin/poetry run pytest -q --timeout 60 \
+              tests/test_shell_background.py::TestOutputCapture::test_split_utf8_pipe_output \
+              tests/test_shell_background.py::TestOutputCapture::test_invalid_utf8_pipe_output \
+              tests/test_shell_background.py::TestOutputCapture::test_incomplete_utf8_flushed_at_stream_eof \
+              tests/test_shell_background.py::TestOutputCapture::test_reader_stop_flushes_pending_utf8 \
+              tests/test_shell_background.py::TestOutputCapture::test_utf8_decoder_state_is_separate_for_each_stream
+          done 2>&1 | tee "$GITHUB_WORKSPACE/proof/repeated.log"
+          git diff --exit-code
+          git rev-parse HEAD | tee "$GITHUB_WORKSPACE/proof/source-head.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: background-utf8-fixed-proof
+          path: proof/
+          retention-days: 7
