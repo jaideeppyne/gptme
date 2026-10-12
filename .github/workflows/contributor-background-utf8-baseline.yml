@@ -1,0 +1,57 @@
+name: Contributor background UTF-8 baseline (fork only)
+on:
+  push:
+    branches: ['verify/background-utf8-baseline']
+permissions:
+  contents: read
+jobs:
+  baseline:
+    if: github.repository == 'jaideeppyne/gptme'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      - name: Clean tests-only source and isolated lockfile environment
+        run: |
+          git worktree add /tmp/gptme-source f1baf7514e4001376952802422fa76e864157d1f
+          git diff --exit-code 0ddbb90f50aab961feed8188041febf2345cee8d f1baf7514e4001376952802422fa76e864157d1f -- gptme poetry.lock pyproject.toml
+          mkdir -p proof /tmp/gptme-baseline-home
+          python -m venv /tmp/gptme-poetry
+          /tmp/gptme-poetry/bin/pip install poetry
+          export HOME=/tmp/gptme-baseline-home
+          export XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"
+          cd /tmp/gptme-source
+          /tmp/gptme-poetry/bin/poetry install -E server
+          /tmp/gptme-poetry/bin/poetry run gptme --version
+          /tmp/gptme-poetry/bin/poetry run pytest tests/test_cli.py::test_version -q --timeout 60
+      - name: Synchronized real subprocess regression and healthy controls
+        run: |
+          export HOME=/tmp/gptme-baseline-home
+          export XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"
+          cd /tmp/gptme-source
+          set -o pipefail
+          set +e
+          /tmp/gptme-poetry/bin/poetry run pytest -v --timeout 60 \
+            --junitxml="$GITHUB_WORKSPACE/proof/baseline.xml" \
+            tests/test_shell_background.py::TestOutputCapture::test_split_utf8_pipe_output \
+            tests/test_shell_background.py::TestOutputCapture::test_invalid_utf8_pipe_output \
+            tests/test_shell_background.py::TestOutputCapture::test_stdout_captured \
+            tests/test_shell_background.py::TestOutputCapture::test_stderr_captured \
+            tests/test_shell_background.py::TestOutputCapture::test_both_streams \
+            2>&1 | tee "$GITHUB_WORKSPACE/proof/baseline.log"
+          result=${PIPESTATUS[0]}
+          set -e
+          test "$result" -eq 1
+          python "$GITHUB_WORKSPACE/.verification/background-utf8/check_baseline.py" "$GITHUB_WORKSPACE/proof" "$result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: background-utf8-baseline-proof
+          path: proof/
+          retention-days: 7
