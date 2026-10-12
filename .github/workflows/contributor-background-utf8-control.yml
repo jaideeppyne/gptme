@@ -1,0 +1,53 @@
+name: Contributor background shell upstream controls (fork only)
+on:
+  push:
+    branches: ['verify/background-shell-controls']
+permissions:
+  contents: read
+jobs:
+  controls:
+    if: github.repository == 'jaideeppyne/gptme'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+      - name: Clean untouched upstream source and isolated lockfile environment
+        run: |
+          git worktree add /tmp/gptme-source 0ddbb90f50aab961feed8188041febf2345cee8d
+          mkdir -p proof /tmp/gptme-fixed-home
+          python -m venv /tmp/gptme-poetry
+          /tmp/gptme-poetry/bin/pip install poetry
+          export HOME=/tmp/gptme-fixed-home
+          export XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"
+          cd /tmp/gptme-source
+          /tmp/gptme-poetry/bin/poetry install -E server
+          /tmp/gptme-poetry/bin/poetry run gptme --version
+          /tmp/gptme-poetry/bin/poetry run pytest tests/test_cli.py::test_version -q --timeout 60
+      - name: Same eight upstream shell suites without the patch
+        run: |
+          export HOME=/tmp/gptme-fixed-home
+          export XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"
+          cd /tmp/gptme-source
+          set -o pipefail
+          /tmp/gptme-poetry/bin/poetry run pytest -v --timeout 60 --retries 0 \
+            -m 'not slow and not eval and not requires_api' \
+            --junitxml="$GITHUB_WORKSPACE/proof/tests.xml" \
+            tests/test_shell_background.py tests/test_shell_foreground_promotion.py \
+            tests/test_shell_high_fd.py tests/test_shell_stream_oneshot.py \
+            tests/test_shell_completion_wait.py tests/test_shell_output_mixing_issue408.py \
+            tests/test_shell_fd_leak.py tests/test_shell_max_output_bytes.py \
+            2>&1 | tee "$GITHUB_WORKSPACE/proof/tests.log"
+          git diff --exit-code
+          git rev-parse HEAD | tee "$GITHUB_WORKSPACE/proof/source-head.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: background-shell-upstream-controls
+          path: proof/
+          retention-days: 7
