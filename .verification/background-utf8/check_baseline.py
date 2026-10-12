@@ -23,7 +23,8 @@ def main() -> None:
         if name.startswith("test_split_utf8_pipe_output["):
             assert failure is not None, f"Regression unexpectedly passed: {name}"
             detail = failure.text or ""
-            assert "AssertionError" in detail and "\\ufffd" in detail, detail
+            assert "AssertionError" in detail, detail
+            assert "\ufffd" in detail or "\\ufffd" in detail, detail
             assert "fixture did not capture" not in detail, detail
             assert "TimeoutExpired" not in detail, detail
             failures.append(name)
